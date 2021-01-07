@@ -1,7 +1,94 @@
-use std::unimplemented;
+use std::{any::TypeId, str::SplitAsciiWhitespace, unimplemented};
 
 use crate::imports::*;
 use crate::symbols::*;
+
+pub fn parse(cmd: &str, state: ClientState) -> Result<CliCommand, CliParseError> {
+    if cmd.is_ascii() {
+        let mut tks = cmd.split_ascii_whitespace();
+        if let Some(first) = tks.nth(0) {
+            // is this even a command?
+            if let Some('/') = first.chars().nth(0) {
+                let rem_toks = &mut tks;
+                // this is a command
+                match first {
+                    "/c" | "/g" => parse_c(rem_toks),
+                    "/d" | "/u" => parse_u(rem_toks),
+                    "/r" => parse_r(rem_toks),
+                    "/s" => parse_s(rem_toks),
+                    "/q" => parse_q(rem_toks),
+                    "/j" => parse_j(rem_toks),
+                    _ => Err(CliParseError::UnrecognizedCommand(first.to_owned()))
+                }
+            } else {
+                // not a command
+                if state == ClientState::Disconnected {
+                    Err(CliParseError::CannotChatNow(cmd.to_owned()))
+                } else {
+                    Ok(CliCommand::Text(cmd.to_owned()))
+                }
+            }
+        } else {
+            Err(CliParseError::Empty)
+        }
+    } else {
+        Err(CliParseError::NotAscii)
+    }
+}
+
+pub fn parse_c(rem_toks: &mut SplitAsciiWhitespace) -> Result<CliCommand, CliParseError> {
+    if let Some(chan) = rem_toks.nth(0) {
+        if let Ok(gid) = chan.parse::<u32>() {
+            Ok(CliCommand::SelectGroup(GroupId::from(gid)))
+        } else {
+            Err(CliParseError::TypeError(TypeId::of::<u32>()))
+        }
+    } else {
+        Err(CliParseError::MissingExpected("gid"))
+    }
+}
+
+pub fn parse_u(rem_toks: &mut SplitAsciiWhitespace) -> Result<CliCommand, CliParseError> {
+    if let Some(chan) = rem_toks.nth(0) {
+        if let Ok(uid) = chan.parse::<u32>() {
+            Ok(CliCommand::SelectUser(UserId::from(uid)))
+        } else {
+            Err(CliParseError::TypeError(TypeId::of::<u32>()))
+        }
+    } else {
+        Err(CliParseError::MissingExpected("uid"))
+    }
+}
+
+// todo
+pub fn parse_r(rem_toks: &mut SplitAsciiWhitespace) -> Result<CliCommand, CliParseError> {
+    Err(CliParseError::NotImpl)
+}
+
+// todo
+pub fn parse_s(rem_toks: &mut SplitAsciiWhitespace) -> Result<CliCommand, CliParseError> {
+    Err(CliParseError::NotImpl)
+}
+
+// todo
+pub fn parse_q(rem_toks: &mut SplitAsciiWhitespace) -> Result<CliCommand, CliParseError> {
+    Err(CliParseError::NotImpl)
+}
+
+// todo
+pub fn parse_j(rem_toks: &mut SplitAsciiWhitespace) -> Result<CliCommand, CliParseError> {
+    Err(CliParseError::NotImpl)
+}
+
+pub enum CliParseError {
+    CannotChatNow(String),
+    Empty,
+    NotAscii,
+    UnrecognizedCommand(String),
+    TypeError(TypeId),
+    MissingExpected(&'static str),
+    NotImpl
+}
 
 /**
 # Commands
@@ -42,31 +129,18 @@ Strings do not require surrounding codes.
 bool, int, uint, float, string
 ```
 */
-pub fn parse_disconnected(cmd: &str, state: ClientState) -> Result<CliCommandDisconnected, String> {
-    unimplemented!()
-}
-
-pub fn parse_connected(cmd: &str, state: ClientState) -> Result<CliCommandConnected, String> {
-    unimplemented!()
-}
-
-pub enum CliCommandDisconnected {
+pub enum CliCommand {
+    GetAttr(String),
+    SetAttr(String, CliType),
+    Query(String),
+    Text(String),
     Join {
         addr: String,
         ws_port: Option<u16>,
         web_port: Option<u16>
     },
-    GetAttr(String),
-    SetAttr(String, CliType)
-}
-
-pub enum CliCommandConnected {
-    SwitchToChannel(String),
-    SwitchToDm(String),
-    GetAttr(String),
-    SetAttr(String, CliType),
-    Query(String),
-    Text(String)
+    SelectGroup(GroupId),
+    SelectUser(UserId)
 }
 
 pub enum CliType {
@@ -77,6 +151,7 @@ pub enum CliType {
     String(String)
 }
 
+#[derive(Eq, PartialEq, Clone)]
 pub enum ClientState {
     Disconnected,
     Connected

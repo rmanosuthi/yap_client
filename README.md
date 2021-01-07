@@ -4,7 +4,7 @@ Client for `yap` - a proof-of-concept chat program
 
 ## IMPORTANT: PROOF OF CONCEPT
 
-*For Highlights see [the server README.](github.com/rmanosuthi/yap-server)*
+*For Highlights see [the server README.](https://github.com/rmanosuthi/yap-server)*
 
 **NOT FOR PRODUCTION USE.** Only basic features have been implemented. DO NOT USE.
 

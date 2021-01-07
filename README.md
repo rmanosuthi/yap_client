@@ -15,7 +15,7 @@ Client for `yap` - a proof-of-concept chat program
 |Done|Public profile
 |Done|Direct messages
 |Done|Password hashing
-|WIP|E2E encryption (DM)
+|Done|E2E encryption (DM)
 |WIP|Group messages
 |Not started|E2E encryption (Group)
 |WIP|Query

@@ -1,8 +1,12 @@
+mod auth;
 mod cli;
 mod common;
-//mod ui;
+
+#[macro_use]
+extern crate structopt;
 
 pub mod symbols {
+    pub use crate::auth::*;
     pub use crate::cli::*;
     pub use crate::common::*;
     //pub use crate::ui::*;
@@ -32,59 +36,115 @@ pub mod imports {
 use crate::imports::*;
 use crate::symbols::*;
 
+use log::LevelFilter;
+use openssl::rsa::Rsa;
+use sha2::{Digest, Sha256};
+use std::{
+    convert::TryFrom,
+    fs::File,
+    io::{BufReader, BufWriter},
+};
+use structopt::StructOpt;
+
 #[tokio::main]
-async fn main() {
-    env_logger::init();
-    const HTTP_ADDR: &'static str = "http://127.0.0.1:8080/";
-    const WS_ADDR: &'static str = "ws://127.0.0.1:9999/";
-    const EMAIL: &'static str = "a@a.com";
-    const PHASH: &'static str = "blah";
-    const PUBKEY: &'static str = "bleh";
-    let args: Vec<String> = std::env::args().collect();
-    debug!("args {:?}", &args);
-    // register?
-    if args[6].parse() == Ok(true) {
-        register(&args[1], &args[3], &args[4], &args[5]).await;
+async fn main() -> Result<(), Box<dyn Error>> {
+    env_logger::builder()
+        .filter_level(LevelFilter::Info)
+        .parse_default_env()
+        .init();
+    let opt = LaunchOptions::from_args();
+    match opt {
+        LaunchOptions::Login { cfg_path } => {
+            let f = File::open(&cfg_path)?;
+            let mut buf = BufReader::new(f);
+            let cfg = serde_json::from_reader(buf)?;
+            info!("Loaded config file");
+            connect(cfg).await;
+        }
+        LaunchOptions::Register {
+            save_to,
+            http_addr,
+            email,
+            password,
+        } => {
+            let client = reqwest::Client::new();
+            // generate password hash
+            let phash = hex::encode({
+                let mut hasher = Sha256::new();
+                hasher.update(password.as_bytes());
+                hasher.finalize().to_vec()
+            });
+            debug!("Register: derived phash {}", &phash);
+            let privkey = Rsa::generate(2048)?;
+            let privkey_serialized = String::from_utf8(privkey.private_key_to_pem().unwrap())?;
+            let pubkey_serialized = String::from_utf8(privkey.public_key_to_pem().unwrap())?;
+            let local_ident = LocalIdentity {
+                privkey: privkey_serialized.clone(),
+                pubkey: pubkey_serialized.clone(),
+            };
+            match client
+                .post(&format!("{}{}", http_addr, "register"))
+                .body(
+                    serde_json::to_string(&RegisterRequest {
+                        email: email.to_owned(),
+                        password_hash: phash.to_owned(),
+                        pubkey: pubkey_serialized.to_owned(),
+                    })
+                    .unwrap(),
+                )
+                .send()
+                .await
+            {
+                Ok(_) => {
+                    info!("Registered.");
+                    let gen_cfg = LocalServerEntry {
+                        http_addr: http_addr,
+                        ws_addr: "".to_owned(),
+                        email: email,
+                        phash: phash,
+                        identity: local_ident,
+                    };
+                    // sync code
+                    let f = File::create(&save_to)?;
+                    let buf = BufWriter::new(f);
+                    serde_json::to_writer_pretty(buf, &gen_cfg).unwrap();
+                    info!(
+                        "Written config to {:?}, make sure to edit the ws address!",
+                        &save_to
+                    );
+                }
+                Err(e) => {
+                    error!("Failed to register: {:?}", e);
+                }
+            }
+        }
     }
-    connect(&args[1], &args[2], &args[3], &args[4]).await;
+    Ok(())
 }
 
-async fn register(
-    http_addr: &str,
-    email: &str,
-    phash: &str,
-    pubkey: &str,
-) -> Result<reqwest::Response, reqwest::Error> {
-    let client = reqwest::Client::new();
-    client
-        .post(&format!("{}{}", http_addr, "register"))
-        .body(
-            serde_json::to_string(&RegisterRequest {
-                email: email.to_owned(),
-                password_hash: phash.to_owned(),
-                pubkey: pubkey.to_owned(),
-            })
-            .unwrap(),
-        )
-        .send()
-        .await
+#[derive(StructOpt)]
+pub enum LaunchOptions {
+    Login {
+        #[structopt(parse(from_os_str))]
+        cfg_path: PathBuf,
+    },
+    Register {
+        #[structopt(parse(from_os_str))]
+        save_to: PathBuf,
+        http_addr: String,
+        email: String,
+        password: String,
+    },
 }
 
-async fn connect(http_addr: &str, ws_addr: &str, email: &str, phash: &str) {
+async fn connect(cfg: LocalServerEntry) {
     let client = reqwest::Client::new();
-    /*let reg_res = client.post(&format!("{}{}", HTTP_ADDR, "register"))
-    .body(serde_json::to_string(&RegisterRequest {
-        email: EMAIL.to_owned(),
-        password_hash: PHASH.to_owned(),
-        pubkey: PUBKEY.to_owned()
-    }).unwrap()).send().await;
-    println!("{:?}", &reg_res);*/
     let lt = client
-        .post(&format!("{}{}", http_addr, "login"))
+        .post(&format!("{}{}", cfg.http_addr, "login"))
         .body(
             serde_json::to_string(&LoginRequest {
-                email: email.to_owned(),
-                password_hash: phash.to_owned(),
+                email: cfg.email.to_owned(),
+                password_hash: cfg.phash.to_owned(),
             })
             .unwrap(),
         )
@@ -97,25 +157,22 @@ async fn connect(http_addr: &str, ws_addr: &str, email: &str, phash: &str) {
     println!("{:?}", &lt);
 
     tokio::time::delay_for(Duration::from_millis(200)).await;
-    //let (mut ctrlc_s, mut ctrlc_r) = tokio::sync::mpsc::channel(1);
-    /*ctrlc::set_handler(move || {
-        ctrlc_s.send(());
-    })
-    .expect("Error setting Ctrl-C handler");*/
     let (mut wss, resp) = tokio_tungstenite::connect_async(
         http::request::Request::builder()
-            .uri(ws_addr)
+            .uri(&cfg.ws_addr)
             .header("Authorization", &lt.tk)
             .body(())
             .unwrap(),
     )
     .await
     .unwrap();
-    info!("connected to {}", &ws_addr);
+    info!("connected to {}", &cfg.ws_addr);
     let mut lines = tokio::io::BufReader::new(tokio::io::stdin()).lines();
     let mut run = true;
     let mut dm_dest = None;
     let mut state = ClientState::Connected;
+    let mut cache_users: HashMap<UserId, PublicUserRecord> = HashMap::new();
+    let key = InMemoryKey::try_from(cfg.identity.clone()).unwrap();
     while run {
         tokio::select! {
             maybe_ws = wss.next() => {
@@ -127,7 +184,30 @@ async fn connect(http_addr: &str, ws_addr: &str, email: &str, phash: &str) {
                                 debug!("ws inc decoded: {:?}", &wsc);
                                 match wsc {
                                     WsClientboundPayload::NewMessage(m) => {
-                                        info!("({}) <<< {}", m.from, m.content);
+                                        let uid = &m.from;
+                                        // try fetch user data
+                                        if let Some(pur) = cache_users.get(uid) {
+                                            if let Some(dec) = pur.decrypt(m.content) {
+                                                info!("({}) <<< {}", m.from, dec);
+                                            } else {
+                                                error!("Failed to decrypt incoming message");
+                                            }
+                                        } else {
+                                            match get_user(&cfg, &client, uid).await {
+                                                Ok(pur) => {
+                                                    cache_users.insert(uid.to_owned(), pur.clone());
+                                                    info!("Added user cache {}", uid);
+                                                    if let Some(dec) = pur.decrypt(m.content) {
+                                                        info!("({}) <<< {}", m.from, dec);
+                                                    } else {
+                                                        error!("Failed to decrypt incoming message");
+                                                    }
+                                                },
+                                                Err(e) => {
+                                                    error!("Failed to get user {}: {:?}", uid, e);
+                                                }
+                                            }
+                                        }
                                     },
                                     _ => {}
                                 }
@@ -148,16 +228,37 @@ async fn connect(http_addr: &str, ws_addr: &str, email: &str, phash: &str) {
                     Ok(cmd) => match cmd {
                         CliCommand::SelectGroup(gid) => {},
                         CliCommand::SelectUser(uid) => {
+                            if let Some(pur) = cache_users.get(&uid) {
+                                // user exists and is cached
+
                             info!("(dm) Targeting {}", &uid);
-                            dm_dest = Some(uid);
+                                dm_dest = Some(uid);
+                            } else {
+                                // user isn't cached, ask server
+                                match get_user(&cfg, &client, &uid).await {
+                                    Ok(pur) => {
+                                        cache_users.insert(uid, pur);
+                                        info!("(dm) Fetched data, targeting {}", &uid);
+                                        dm_dest = Some(uid);
+                                    },
+                                    Err(e) => {
+                                        error!("Failed to get user {}: {:?}", uid, e);
+                                    }
+                                }
+                            }
                         },
                         CliCommand::Text(s) => {
                             match dm_dest {
                                 Some(uid) => {
-                                    wss.send(WsServerboundPayload::NewUserMessage {
-                                        to: uid,
-                                        content: ClientMessage::from(s)
-                                    }.into()).await;
+                                    if let Some(enc) = key.encrypt(&s) {
+                                        wss.send(WsServerboundPayload::NewUserMessage {
+                                            to: uid,
+                                            content: ClientMessage::from(enc)
+                                        }.into()).await;
+                                        info!("(encrypted, self) >>> {}", s);
+                                    } else {
+                                        error!("Failed to encrypt message");
+                                    }
                                 },
                                 None => {
                                     warn!("Missing recipient");
@@ -179,6 +280,27 @@ async fn connect(http_addr: &str, ws_addr: &str, email: &str, phash: &str) {
             }*/
         }
     }
+}
+
+#[derive(Debug)]
+pub enum GetUserError {
+    RequestFailed,
+    DeserializeFailed,
+}
+
+async fn get_user(
+    cfg: &LocalServerEntry,
+    client: &reqwest::Client,
+    uid: &UserId,
+) -> Result<PublicUserRecord, GetUserError> {
+    let resp = client
+        .get(&format!("{}{}/{}", cfg.http_addr, "users", uid))
+        .send()
+        .await
+        .map_err(|_| GetUserError::RequestFailed)?;
+    resp.json()
+        .map_err(|_| GetUserError::DeserializeFailed)
+        .await
 }
 
 fn print_parse_e(e: CliParseError) {

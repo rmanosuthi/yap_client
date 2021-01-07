@@ -188,7 +188,7 @@ async fn connect(cfg: LocalServerEntry) {
                                         // try fetch user data
                                         if let Some(pur) = cache_users.get(uid) {
                                             if let Some(dec) = pur.decrypt(m.content) {
-                                                info!("({}) <<< {}", m.from, dec);
+                                                info!("(decrypted, {}) <<< {}", m.from, dec);
                                             } else {
                                                 error!("Failed to decrypt incoming message");
                                             }
@@ -198,7 +198,7 @@ async fn connect(cfg: LocalServerEntry) {
                                                     cache_users.insert(uid.to_owned(), pur.clone());
                                                     info!("Added user cache {}", uid);
                                                     if let Some(dec) = pur.decrypt(m.content) {
-                                                        info!("({}) <<< {}", m.from, dec);
+                                                        info!("(decrypted, {}) <<< {}", m.from, dec);
                                                     } else {
                                                         error!("Failed to decrypt incoming message");
                                                     }

@@ -165,6 +165,12 @@ mod shared {
         }
     }
 
+    impl ToString for Pubkey {
+        fn to_string(&self) -> String {
+            self.0.to_owned()
+        }
+    }
+
     /// Hashed password. Server performs no validation!
     #[derive(Serialize, Deserialize, Debug, Clone)]
     pub struct HashedPassword(String);

@@ -1,7 +1,6 @@
 use std::{any::TypeId, str::SplitAsciiWhitespace, unimplemented};
 
-use crate::imports::*;
-use crate::symbols::*;
+use common::{GroupId, UserId};
 
 pub fn parse(cmd: &str, state: ClientState) -> Result<CliCommand, CliParseError> {
     if cmd.is_ascii() {
@@ -72,7 +71,7 @@ pub fn parse_s(rem_toks: &mut SplitAsciiWhitespace) -> Result<CliCommand, CliPar
 
 // todo
 pub fn parse_q(rem_toks: &mut SplitAsciiWhitespace) -> Result<CliCommand, CliParseError> {
-    Err(CliParseError::NotImpl)
+    Ok(CliCommand::Quit)
 }
 
 // todo
@@ -132,7 +131,6 @@ bool, int, uint, float, string
 pub enum CliCommand {
     GetAttr(String),
     SetAttr(String, CliType),
-    Query(String),
     Text(String),
     Join {
         addr: String,
@@ -140,7 +138,8 @@ pub enum CliCommand {
         web_port: Option<u16>
     },
     SelectGroup(GroupId),
-    SelectUser(UserId)
+    SelectUser(UserId),
+    Quit
 }
 
 pub enum CliType {

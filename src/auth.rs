@@ -1,13 +1,12 @@
 use std::convert::TryFrom;
 
-use crate::imports::*;
-use crate::symbols::*;
+use common::{ClientMessage, PublicUserRecord};
 use openssl::{error::ErrorStack, pkey::{Public, Private}, rsa::{Padding, Rsa}};
+use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
 pub struct LocalServerEntry {
     pub http_addr: String,
-    pub ws_addr: String,
     pub email: String,
     pub phash: String,
     pub identity: LocalIdentity
@@ -47,16 +46,4 @@ impl TryFrom<LocalIdentity> for InMemoryKey {
     }
 }
 
-impl PublicUserRecord {
-    /// Input message was signed with **private key of origin.**
-    pub fn decrypt(&self, msg: ClientMessage) -> Option<String> {
-        let in_bytes = msg.to_string();
-        let pubkey = Rsa::public_key_from_pem(self.pubkey.to_string().as_bytes()).ok()?;
-        let mut res = vec![0; 10000];
-        let unhexed = hex::decode(in_bytes.as_bytes()).ok()?;
-        debug!("unhex ok");
-        let bytes_written = pubkey.public_decrypt(&unhexed, &mut res, Padding::PKCS1).ok()?;
-        debug!("content decode ok");
-        String::from_utf8(res).ok()
-    }
-}
+
